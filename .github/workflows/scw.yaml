@@ -1,0 +1,58 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+  SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+  SCW_DEFAULT_PROJECT_ID: 2cac9ffb-9e9c-4d01-be13-e665e893574b
+  SCW_DEFAULT_ORGANIZATION_ID: 2cac9ffb-9e9c-4d01-be13-e665e893574b
+  SCW_DEFAULT_REGION: fr-par
+  SCW_DEFAULT_ZONE: fr-par-1
+  CONTAINER_ID: will-be-added-later
+  CONTAINER_NAME: airtable-automation
+  CR_URL: rg.fr-par.scw.cloud/airtable-automation
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SCW CLI setup
+        run: |
+          curl -s https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sh
+
+      - name: SCW init
+        run: |
+          scw init secret-key=$SCW_SECRET_KEY \
+                   access-key=$SCW_ACCESS_KEY \
+                   organization-id=$SCW_DEFAULT_ORGANIZATION_ID \
+                   project-id=$SCW_DEFAULT_PROJECT_ID \
+                   send-telemetry=false \
+                   with-ssh-key=false \
+                   region=$SCW_DEFAULT_REGION \
+                   zone=$SCW_DEFAULT_ZONE
+
+      - name: Login docker registery
+        run: |
+          docker login $CR_URL -u nologin --password-stdin <<< "$SCW_SECRET_KEY"
+
+      - name: Generate tag
+        id: tagstep
+        run: echo "::set-output name=tag::$(date +'%Y%m%d%H%M%S')"
+
+      - uses: actions/checkout@v3
+
+      - name: Build, Tag, Push the Docker image
+        run: |
+          TAG=$(echo "${{ steps.tagstep.outputs.tag }}")
+
+          docker build . --file Dockerfile --tag $CONTAINER_NAME:$TAG
+          docker tag $CONTAINER_NAME:$TAG $CR_URL/$CONTAINER_NAME:$TAG
+          docker push $CR_URL/$CONTAINER_NAME:$TAG
+
+      - name: Deploy
+        run: |
+          scw container container update $CONTAINER_ID registry-image=$CR_URL/$CONTAINER_NAME:${{ steps.tagstep.outputs.tag }}
